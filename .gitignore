@@ -1,2 +1,3 @@
 .needs/
 chroma_db/
+db.sqlite3
