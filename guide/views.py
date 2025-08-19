@@ -134,9 +134,8 @@ class CodeSearcher:
     def __init__(self):
         self.collection = chroma_client.get_collection("codebase")
 
-    def search_and_explain(self, query: str, top_k: int = 3) -> Dict[str, Any]:
+    def search_and_explain(self, query: str, top_k: int = 1) -> Dict[str, Any]:
         try:
-            # Search
             query_embedding = embedding_model.encode([query])[0].tolist()
             results = self.collection.query(
                 query_embeddings=[query_embedding],
@@ -226,7 +225,7 @@ def upload_and_index_code(request):
 def search_code(request):
     try:
         query = request.data.get("query")
-        top_k = request.data.get("top_k", 3)
+        top_k = request.data.get("top_k", 1)
 
         if not query:
             return Response(
@@ -242,6 +241,3 @@ def search_code(request):
 
     except Exception as e:
         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-
-
