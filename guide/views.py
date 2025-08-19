@@ -56,34 +56,34 @@ class CodeIndexer:
                             "filename": filename,
                             "line_start": node.lineno,
                             "line_end": getattr(node, "end_lineno", node.lineno),
+                            "parent": getattr(node, "parent_name", None),
                         }
                     )
                 elif isinstance(node, ast.ClassDef):
                     code = self._extract_node_code(lines, node)
+                    # Store class name for its methods
+                    class_name = node.name
                     chunks.append(
                         {
                             "id": str(uuid.uuid4()),
                             "code": code,
                             "type": "class",
-                            "name": node.name,
+                            "name": class_name,
                             "filename": filename,
                             "line_start": node.lineno,
                             "line_end": getattr(node, "end_lineno", node.lineno),
+                            "parent": None,
                         }
                     )
+                    # Set parent name for methods inside this class
+                    for child in ast.iter_child_nodes(node):
+                        if isinstance(child, ast.FunctionDef):
+                            child.parent_name = class_name
 
-        except SyntaxError:
-            chunks.append(
-                {
-                    "id": str(uuid.uuid4()),
-                    "code": file_content,
-                    "type": "text",
-                    "name": filename,
-                    "filename": filename,
-                    "line_start": 1,
-                    "line_end": len(file_content.splitlines()),
-                }
-            )
+        except SyntaxError as e:
+            print(f"Error parsing {filename}: {str(e)}")
+        except Exception as e:
+            print(f"Unexpected error parsing {filename}: {str(e)}")
 
         return chunks
 
@@ -124,10 +124,15 @@ class CodeSearcher:
 
     def search_and_explain(self, query: str, top_k: int = 1) -> Dict[str, Any]:
         try:
-            query_embedding = embedding_model.encode([query])[0].tolist()
+            # Create a focused search context
+            search_context = f"Question: {query}\nFind the most relevant code that answers this question."
+            query_embedding = embedding_model.encode([search_context])[0].tolist()
+
+            # Get more results initially to filter
+            initial_k = top_k * 3
             results = self.collection.query(
                 query_embeddings=[query_embedding],
-                n_results=top_k,
+                n_results=initial_k,
                 include=["documents", "metadatas", "distances"],
             )
 
@@ -136,7 +141,20 @@ class CodeSearcher:
                 metadata = results["metadatas"][0][i]
                 distance = results["distances"][0][i]
 
+                # Only process if similarity score is good enough
+                similarity = 1 - distance
+                if similarity < 0.5:  # Adjust threshold as needed
+                    continue
+
+                # Get a focused explanation
                 explanation = self._explain_code(metadata["code"], query)
+
+                # Skip if explanation indicates not relevant
+                if (
+                    "not relevant" in explanation.lower()
+                    or "does not" in explanation.lower()
+                ):
+                    continue
 
                 processed.append(
                     {
@@ -146,10 +164,15 @@ class CodeSearcher:
                         "name": metadata["name"],
                         "line_start": metadata["line_start"],
                         "line_end": metadata["line_end"],
-                        "similarity_score": round(1 - distance, 3),
+                        "parent": metadata.get("parent"),
+                        "similarity_score": round(similarity, 3),
                         "explanation": explanation,
                     }
                 )
+
+                # Stop if we have enough good results
+                if len(processed) >= top_k:
+                    break
 
             return {
                 "status": "success",
@@ -163,12 +186,19 @@ class CodeSearcher:
 
     def _explain_code(self, code: str, query: str) -> str:
         try:
-            prompt = f"Query: {query}\n\nCode:\n{code}\n\nExplain this code briefly:"
+            prompt = f"""Based on this specific question: {query}
+
+Analyze this code:
+{code}
+
+Provide a focused answer about how this specific code snippet answers the question.
+If this code is not relevant to the question, say "This code is not relevant to the question."
+Be brief and specific to the question asked."""
 
             response = ollama_client.generate(
                 model="codellama",
                 prompt=prompt,
-                options={"temperature": 0.3, "num_predict": 150},
+                options={"temperature": 0.2, "num_predict": 100},
             )
             return response["response"].strip()
         except Exception as e:
