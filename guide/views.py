@@ -72,18 +72,6 @@ class CodeIndexer:
                         }
                     )
 
-            chunks.append(
-                {
-                    "id": str(uuid.uuid4()),
-                    "code": file_content,
-                    "type": "file",
-                    "name": filename,
-                    "filename": filename,
-                    "line_start": 1,
-                    "line_end": len(lines),
-                }
-            )
-
         except SyntaxError:
             chunks.append(
                 {
