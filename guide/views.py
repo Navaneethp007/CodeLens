@@ -43,10 +43,35 @@ class CodeIndexer:
         try:
             tree = ast.parse(file_content)
             lines = file_content.splitlines()
+            print(f"\nParsing {filename}...")
 
+            # Track class context
+            current_class = None
             for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef):
+                if isinstance(node, ast.ClassDef):
+                    current_class = node
                     code = self._extract_node_code(lines, node)
+                    print(f"Found class: {node.name}")
+                    chunks.append(
+                        {
+                            "id": str(uuid.uuid4()),
+                            "code": code,
+                            "type": "class",
+                            "name": node.name,
+                            "filename": filename,
+                            "line_start": node.lineno,
+                            "line_end": getattr(node, "end_lineno", node.lineno),
+                            "parent": "",
+                        }
+                    )
+                elif isinstance(node, ast.FunctionDef):
+                    code = self._extract_node_code(lines, node)
+                    # Check if this function is a method of the current class
+                    parent = current_class.name if (
+                        current_class 
+                        and node in current_class.body
+                    ) else ""
+                    print(f"Found {'method' if parent else 'function'}: {node.name}{' in class ' + parent if parent else ''}")
                     chunks.append(
                         {
                             "id": str(uuid.uuid4()),
@@ -56,29 +81,9 @@ class CodeIndexer:
                             "filename": filename,
                             "line_start": node.lineno,
                             "line_end": getattr(node, "end_lineno", node.lineno),
-                            "parent": getattr(node, "parent_name", None),
+                            "parent": parent,
                         }
                     )
-                elif isinstance(node, ast.ClassDef):
-                    code = self._extract_node_code(lines, node)
-                    # Store class name for its methods
-                    class_name = node.name
-                    chunks.append(
-                        {
-                            "id": str(uuid.uuid4()),
-                            "code": code,
-                            "type": "class",
-                            "name": class_name,
-                            "filename": filename,
-                            "line_start": node.lineno,
-                            "line_end": getattr(node, "end_lineno", node.lineno),
-                            "parent": None,
-                        }
-                    )
-                    # Set parent name for methods inside this class
-                    for child in ast.iter_child_nodes(node):
-                        if isinstance(child, ast.FunctionDef):
-                            child.parent_name = class_name
 
         except SyntaxError as e:
             print(f"Error parsing {filename}: {str(e)}")
@@ -94,13 +99,22 @@ class CodeIndexer:
 
     def _store_chunk(self, chunk: Dict[str, Any]) -> bool:
         try:
-            # Create searchable text with better context for search
-            parent_info = f"In class {chunk.get('parent')}. " if chunk.get('parent') else ""
-            searchable_text = f"File: {chunk['filename']}\nType: {chunk['type']}\nName: {chunk['name']}\n{parent_info}Code:\n{chunk['code']}"
+            # Build a rich description for better semantic search
+            chunk_type = "method" if chunk.get('parent') else chunk['type']
+            context = f"This {chunk_type} is named {chunk['name']}"
+            if chunk.get('parent'):
+                context += f" and belongs to class {chunk['parent']}"
+            
+            searchable_text = f"""Description: {context}
+Location: {chunk['filename']} (lines {chunk['line_start']}-{chunk['line_end']})
+Code:
+{chunk['code']}"""
 
+            print(f"Indexing {chunk_type} {chunk['name']}")
+            
             embedding = embedding_model.encode([searchable_text])[0].tolist()
             
-            # Ensure all metadata values are strings or numbers (no None values)
+            # Ensure all metadata values are strings or numbers
             metadata = {
                 "filename": str(chunk['filename']),
                 "type": str(chunk['type']),
@@ -108,7 +122,7 @@ class CodeIndexer:
                 "line_start": int(chunk['line_start']),
                 "line_end": int(chunk['line_end']),
                 "code": str(chunk['code']),
-                "parent": str(chunk.get('parent', '')),  # Convert None to empty string
+                "parent": str(chunk.get('parent', '')),  # Empty string if no parent
                 "parent": str(chunk.get('parent', ''))  # Empty string if no parent
             }
             
@@ -192,14 +206,18 @@ class CodeSearcher:
 
     def _explain_code(self, code: str, query: str) -> str:
         try:
-            prompt = f"""Based on this specific question: {query}
+            prompt = f"""Given the user's question: "{query}"
 
-Analyze this code:
+Analyze this code snippet:
 {code}
 
-Provide a focused answer about how this specific code snippet answers the question.
-If this code is not relevant to the question, say "This code is not relevant to the question."
-Be brief and specific to the question asked."""
+Task: Explain specifically how this code relates to the user's question.
+- If this code answers the question: Explain exactly how it does so
+- If this code is not relevant: Say "This code is not relevant to the question"
+- Focus only on parts that directly answer the question
+- Be concise and specific
+
+Your explanation:"""
 
             response = ollama_client.generate(
                 model="codellama",
