@@ -122,7 +122,6 @@ Code:
                 "line_start": int(chunk['line_start']),
                 "line_end": int(chunk['line_end']),
                 "code": str(chunk['code']),
-                "parent": str(chunk.get('parent', '')),  # Empty string if no parent
                 "parent": str(chunk.get('parent', ''))  # Empty string if no parent
             }
             
@@ -141,64 +140,104 @@ Code:
 class CodeSearcher:
     def __init__(self):
         self.collection = chroma_client.get_collection("codebase")
+        
+    def _check_collection(self) -> bool:
+        try:
+            count = self.collection.count()
+            print(f"\nCollection status:")
+            print(f"Total documents indexed: {count}")
+            return count > 0
+        except Exception as e:
+            print(f"Error checking collection: {e}")
+            return False
 
     def search_and_explain(self, query: str, top_k: int = 1) -> Dict[str, Any]:
         try:
-            # Create a focused search context
-            search_context = f"Question: {query}\nFind the most relevant code that answers this question."
-            query_embedding = embedding_model.encode([search_context])[0].tolist()
-
-            # Get more results initially to filter
-            initial_k = top_k * 3
-            results = self.collection.query(
-                query_embeddings=[query_embedding],
-                n_results=initial_k,
-                include=["documents", "metadatas", "distances"],
-            )
-
-            processed = []
-            for i in range(len(results["documents"][0])):
-                metadata = results["metadatas"][0][i]
-                distance = results["distances"][0][i]
-
-                # Only process if similarity score is good enough
-                similarity = 1 - distance
-                if similarity < 0.5:  # Adjust threshold as needed
-                    continue
-
-                # Get a focused explanation
-                explanation = self._explain_code(metadata["code"], query)
-
-                # Skip if explanation indicates not relevant
-                if (
-                    "not relevant" in explanation.lower()
-                    or "does not" in explanation.lower()
-                ):
-                    continue
-
-                processed.append(
-                    {
+            print("\n=== Search Debug Info ===")
+            print(f"Query: {query}")
+            
+            # Check if we have any documents
+            count = self.collection.count()
+            print(f"Documents in collection: {count}")
+            if count == 0:
+                return {
+                    "status": "success",
+                    "query": query,
+                    "results": [],
+                    "total_results": 0,
+                    "debug_info": "No documents indexed"
+                }
+            
+            # Try different query formulations
+            search_queries = [
+                query,
+                f"Find code that {query}",
+                f"Where is the code that {query}",
+                f"Which function {query}"
+            ]
+            print(f"Trying {len(search_queries)} query variations")
+            
+            all_results = []
+            for search_query in search_queries:
+                # Get embedding for this query variation
+                query_embedding = embedding_model.encode([search_query])[0].tolist()
+                
+                # Search with very lenient initial filtering
+                results = self.collection.query(
+                    query_embeddings=[query_embedding],
+                    n_results=max(5, top_k),  # Get at least 5 results
+                    include=["documents", "metadatas", "distances"],
+                )
+                
+                print(f"Found {len(results['documents'][0])} matches for '{search_query}'")
+                
+                # Process results
+                for i in range(len(results["documents"][0])):
+                    metadata = results["metadatas"][0][i]
+                    distance = results["distances"][0][i]
+                    similarity = 1 - distance
+                    
+                    # Skip if we've already found this code
+                    if any(r["code"] == metadata["code"] for r in all_results):
+                        continue
+                    
+                    # Get explanation
+                    explanation = self._explain_code(metadata["code"], query)
+                    print(f"Got explanation for {metadata['name']}: {explanation[:50]}...")
+                    
+                    # Only skip if explicitly marked as not relevant
+                    if explanation.lower().startswith("this code is not relevant"):
+                        print(f"Skipping {metadata['name']} - marked as not relevant")
+                        continue
+                        
+                    # Add to results
+                    all_results.append({
                         "code": metadata["code"],
                         "filename": metadata["filename"],
                         "type": metadata["type"],
                         "name": metadata["name"],
                         "line_start": metadata["line_start"],
                         "line_end": metadata["line_end"],
-                        "parent": metadata.get("parent"),
+                        "parent": metadata["parent"],
                         "similarity_score": round(similarity, 3),
                         "explanation": explanation,
-                    }
-                )
-
-                # Stop if we have enough good results
-                if len(processed) >= top_k:
-                    break
-
+                    })
+            
+            # Sort by similarity score and take top results
+            all_results.sort(key=lambda x: x["similarity_score"], reverse=True)
+            final_results = all_results[:top_k] if all_results else []
+            
+            print(f"\nFound {len(final_results)} relevant results out of {len(all_results)} total matches")
+            
             return {
                 "status": "success",
                 "query": query,
-                "results": processed,
-                "total_results": len(processed),
+                "results": final_results,
+                "total_results": len(final_results),
+                "debug_info": {
+                    "total_matches": len(all_results),
+                    "queries_tried": search_queries
+                }
             }
 
         except Exception as e:
@@ -263,6 +302,21 @@ def upload_and_index_code(request):
         return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+@api_view(["GET"])
+def collection_status(request):
+    """Debug endpoint to check collection status"""
+    try:
+        collection = chroma_client.get_collection("codebase")
+        count = collection.count()
+        peek = collection.peek() if count > 0 else {}
+        return Response({
+            "status": "success",
+            "total_documents": count,
+            "sample_document": peek,
+        })
+    except Exception as e:
+        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 @api_view(["POST"])
 def search_code(request):
     try:
@@ -274,7 +328,26 @@ def search_code(request):
                 {"error": "No query provided"}, status=status.HTTP_400_BAD_REQUEST
             )
 
+        # Check collection status first
+        collection = chroma_client.get_collection("codebase")
+        count = collection.count()
+        if count == 0:
+            return Response({
+                "status": "success",
+                "query": query,
+                "results": [],
+                "total_results": 0,
+                "debug_info": "No documents indexed. Please index some files first."
+            })
+
         result = code_searcher.search_and_explain(query, top_k)
+        
+        # Add debug info to result
+        result["debug_info"] = {
+            "total_documents": count,
+            "query": query,
+            "top_k": top_k
+        }
 
         if result["status"] == "success":
             return Response(result, status=status.HTTP_200_OK)
