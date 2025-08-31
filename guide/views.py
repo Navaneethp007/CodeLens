@@ -94,24 +94,29 @@ class CodeIndexer:
 
     def _store_chunk(self, chunk: Dict[str, Any]) -> bool:
         try:
-            searchable_text = f"File: {chunk['filename']}\nType: {chunk['type']}\nName: {chunk['name']}\nCode:\n{chunk['code']}"
+            # Create searchable text with better context for search
+            parent_info = f"In class {chunk.get('parent')}. " if chunk.get('parent') else ""
+            searchable_text = f"File: {chunk['filename']}\nType: {chunk['type']}\nName: {chunk['name']}\n{parent_info}Code:\n{chunk['code']}"
 
             embedding = embedding_model.encode([searchable_text])[0].tolist()
+            
+            # Ensure all metadata values are strings or numbers (no None values)
+            metadata = {
+                "filename": str(chunk['filename']),
+                "type": str(chunk['type']),
+                "name": str(chunk['name']),
+                "line_start": int(chunk['line_start']),
+                "line_end": int(chunk['line_end']),
+                "code": str(chunk['code']),
+                "parent": str(chunk.get('parent', '')),  # Convert None to empty string
+                "parent": str(chunk.get('parent', ''))  # Empty string if no parent
+            }
+            
             self.collection.add(
                 embeddings=[embedding],
                 documents=[searchable_text],
                 ids=[chunk["id"]],
-                metadatas=[
-                    {
-                        "filename": chunk["filename"],
-                        "type": chunk["type"],
-                        "name": chunk["name"],
-                        "line_start": chunk["line_start"],
-                        "line_end": chunk["line_end"],
-                        "code": chunk["code"],
-                        "parent": chunk.get("parent")
-                    }
-                ],
+                metadatas=[metadata],
             )
             return True
         except Exception as e:
