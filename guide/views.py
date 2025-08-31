@@ -109,7 +109,7 @@ class CodeIndexer:
                         "line_start": chunk["line_start"],
                         "line_end": chunk["line_end"],
                         "code": chunk["code"],
-                        "parent": chunk.get("parent"),
+                        "parent": chunk.get("parent")
                     }
                 ],
             )
@@ -126,11 +126,11 @@ class CodeSearcher:
     def search_and_explain(self, query: str, top_k: int = 1) -> Dict[str, Any]:
         try:
             # Create a focused search context
-            search_context = f"Question: {query}\nFind code that: {query}"
+            search_context = f"Question: {query}\nFind the most relevant code that answers this question."
             query_embedding = embedding_model.encode([search_context])[0].tolist()
 
             # Get more results initially to filter
-            initial_k = max(top_k * 3, 5)  # Get at least 5 results to filter from
+            initial_k = top_k * 3
             results = self.collection.query(
                 query_embeddings=[query_embedding],
                 n_results=initial_k,
@@ -142,16 +142,19 @@ class CodeSearcher:
                 metadata = results["metadatas"][0][i]
                 distance = results["distances"][0][i]
 
-                # Calculate similarity but with a lower threshold
+                # Only process if similarity score is good enough
                 similarity = 1 - distance
-                if similarity < 0.3:  # Lowered threshold
+                if similarity < 0.5:  # Adjust threshold as needed
                     continue
 
                 # Get a focused explanation
                 explanation = self._explain_code(metadata["code"], query)
 
-                # Skip only if explicitly marked as not relevant
-                if explanation.lower().startswith("this code is not relevant"):
+                # Skip if explanation indicates not relevant
+                if (
+                    "not relevant" in explanation.lower()
+                    or "does not" in explanation.lower()
+                ):
                     continue
 
                 processed.append(
