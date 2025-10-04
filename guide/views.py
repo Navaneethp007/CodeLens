@@ -39,7 +39,9 @@ def upload_file(request):
         
     except UnicodeDecodeError:
         return Response({'error': 'File encoding not supported'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'error': 'File encoding not supported'}, status=status.HTTP_400_BAD_REQUEST)
     except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['POST'])
