@@ -1,64 +1,79 @@
 # CodeLens
 
-A Django-based web application that provides intelligent code search and indexing capabilities using embeddings and AI-powered code analysis.
+An AI-powered code analysis tool that provides intelligent code search and natural language querying for Python codebases using semantic embeddings and LLM-based analysis.
 
 ## Features
 
-- **Code Indexing**: Upload and index Python code files with intelligent chunking of classes, functions, and code blocks
-- **Semantic Search**: Search through indexed code using natural language queries
-- **AI-Powered Analysis**: Leverages CodeLlama to analyze and explain code relevance to search queries
-- **Smart Chunking**: Automatically breaks down code into meaningful chunks while preserving context
-- **Embeddings**: Uses Sentence Transformers to generate semantic embeddings for accurate code search
-- **REST API**: Built with Django REST framework for easy integration
-- **Vector Database**: Uses ChromaDB for efficient storage and retrieval of code embeddings
+- **Direct Analysis**: Small files (<30KB) analyzed directly by LLM for maximum accuracy
+- **Smart Chunking**: Large files automatically chunked into semantic units (functions, classes, assignments)
+- **Query Classification**: Automatically routes comprehensive vs. specific queries to appropriate retrieval strategies
+- **Metadata Filtering**: Direct filtering for comprehensive queries ("what are all the agents?")
+- **Hybrid Search**: Combines keyword and semantic search for specific queries
+- **Vector Storage**: ChromaDB with persistent storage for code embeddings
+- **AI-Powered Explanations**: CodeLlama generates contextual answers to natural language questions
 
 ## Architecture
 
-- **Backend**: Django + Django REST Framework application featuring:
-  - Intelligent code parsing with Python's AST
-  - Semantic code search using embeddings
-  - Vector storage with ChromaDB
-  - AI-powered code analysis with CodeLlama
-  - Smart code chunking and indexing
+### Components
 
-- **Key Technologies**:
-  - `Django`: Web framework for building the API
-  - `Django REST Framework`: For RESTful API endpoints
-  - `ChromaDB`: Vector database for storing code embeddings
-  - `Sentence Transformers`: For generating code embeddings
-  - `Ollama`: Interface with CodeLlama for code analysis
-  - `ast`: Python Abstract Syntax Tree for code parsing
+- **Direct Analyzer**: Sends entire file to LLM for files <30KB
+- **Chunked Analyzer**: For larger files, uses intelligent retrieval pipeline:
+  1. AST Parser → extracts code structures
+  2. Chunk Builder → creates semantic chunks with metadata
+  3. Query Classifier → determines query type
+  4. Metadata Filter → filters by type for comprehensive queries
+  5. Hybrid Search → keyword + semantic search for specific queries
+  6. LLM Generation → synthesizes answer from retrieved chunks
 
-## Currently Working
+### Technologies
 
-- ✅ Code file upload and indexing endpoint (`/guide/upload/`)
-- ✅ Semantic code search endpoint (`/guide/search/`)
-- ✅ Smart code chunking and analysis
-- ✅ Integration with ChromaDB for vector storage
-- ✅ AI-powered code relevance explanations
+- **Django + DRF**: REST API framework
+- **ChromaDB**: Persistent vector database
+- **Sentence Transformers**: all-MiniLM-L6-v2 for embeddings
+- **Ollama + CodeLlama**: Local LLM for code analysis
+- **Python AST**: Code parsing and structure extraction
 
 ## Project Structure
 
 ```
 CodeLens/
-├── CodeLens/          # Main project directory
-│   ├── settings.py    # Project settings
-│   └── urls.py       # Main URL configuration
-├── guide/            # Main application
-│   ├── views.py      # Core logic and API endpoints
-│   └── urls.py       # App URL configuration
-├── manage.py         # Django management script
-└── requirements.txt  # Project dependencies
-```
+├── CodeLens/              # Project settings
+│   ├── settings.py
+│   └── urls.py
+├── guide/                 # Main application
+│   ├── views.py          # API endpoints
+│   ├── urls.py           # URL routing
+│   ├── analyzers/        # Analysis strategies
+│   │   ├── direct_analyzer.py
+│   │   └── chunked_analyzer.py
+│   ├── chunking/         # Code parsing
+│   │   ├── ast_parser.py
+│   │   └── chunk_builder.py
+│   ├── retrieval/        # Search strategies
+│   │   ├── query_classifier.py
+│   │   ├── metadata_filter.py
+│   │   └── hybrid_search.py
+│   └── storage/          # Data persistence
+│       ├── session_store.py
+│       └── chroma_manager.py
+└── manage.py
 
 ## API Endpoints
 
-- `POST /guide/upload/`: Upload and index code files
-  - Accepts code files with form data
-  - Returns indexing statistics and status
+### Upload File
+POST /api/upload/
+- **Body**: `multipart/form-data` with `file` field
+- **Returns**: Upload status, file size, analysis method (direct/chunked)
 
-- `GET /guide/search/`: Search indexed code
-  - Parameters: 
-    - `query`: Natural language search query
-    - `top_k`: Number of results to return (default: 1)
-  - Returns relevant code snippets with explanations
+### Query Code
+POST /api/query/
+- **Body**: `{"query": "What are the different agents in this file?"}`
+- **Returns**: 
+```json
+  {
+    "status": "success",
+    "query": "...",
+    "answer": "...",
+    "method": "direct_analysis|chunked_analysis",
+    "chunks_analyzed": 10
+  }
