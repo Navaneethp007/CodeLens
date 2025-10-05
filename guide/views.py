@@ -10,7 +10,7 @@ session_store = SessionStore()
 direct_analyzer = DirectAnalyzer()
 chunked_analyzer = ChunkedAnalyzer()
 
-FILE_SIZE_THRESHOLD = 30000  # 30KB
+FILE_SIZE_THRESHOLD = 3000
 
 @api_view(['POST'])
 def upload_file(request):
@@ -96,4 +96,5 @@ def file_status(request):
         return Response({
             'status': 'no_file',
             'message': 'No file currently uploaded'
+
         }, status=status.HTTP_200_OK)
