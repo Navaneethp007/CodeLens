@@ -76,11 +76,12 @@ class ChunkedAnalyzer:
     def _generate_answer(self, query: str, chunks: list, filename: str) -> str:
         try:
             context = f"Filename: {filename}\n\n"
-            context += f"Relevant Code Sections ({len(chunks)} total):\n\n"
+            context += f"Relevant Code Sections ({len(chunks)} total, sorted by relevance):\n\n"
             
-            # FIX: Show ALL chunks, not limited
+            # Show ALL reranked chunks (already filtered by relevance threshold)
             for i, chunk in enumerate(chunks, 1):
-                context += f"{i}. {chunk['name']} ({chunk['type']}) [lines {chunk['line_start']}-{chunk['line_end']}]:\n"
+                relevance = chunk.get('relevance_score', 0)
+                context += f"{i}. {chunk['name']} ({chunk['type']}) [Relevance: {relevance:.2f}]:\n"
                 context += f"{chunk['code']}\n\n"
             
             prompt = f"""{context}
@@ -88,18 +89,17 @@ class ChunkedAnalyzer:
     User Question: {query}
     
     Instructions:
-    - Analyze ALL {len(chunks)} code sections above
-    - If asked about "all" or "different" items, list EVERY one you find
-    - Be specific with names and details
-    - Ignore irrelevant sections
-    - Give one comprehensive answer
+    - All code sections above are highly relevant (passed reranking)
+    - Answer comprehensively using these sections
+    - If asked about "all" or "different" items, list every relevant one
+    - Be specific and complete
     
     Answer:"""
             
             response = self.ollama_client.generate(
                 model='codellama',
                 prompt=prompt,
-                options={'temperature': 0.1, 'num_predict': 600}  # Increased for longer answers
+                options={'temperature': 0.1, 'num_predict': 800}
             )
             
             return response['response'].strip()
