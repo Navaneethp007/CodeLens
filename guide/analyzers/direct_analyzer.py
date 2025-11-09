@@ -44,4 +44,13 @@ Filename: {filename}
 Code:
 ```python
 {file_content}
-"""
+Question: {query}   
+Instructions:
+- Analyze the entire code file carefully
+- Provide a complete and accurate answer
+- If asked about "all" or "different" items, list EVERY one you find
+- Be specific with names, line numbers, and details
+- Only include information that exists in the code
+- Give one comprehensive answer
+
+Answer:"""
