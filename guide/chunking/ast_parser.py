@@ -2,9 +2,14 @@ import ast
 from typing import Dict, List, Any
 
 class ASTParser:
+    """Parse Python code using AST"""
+    
     def parse(self, file_content: str, filename: str) -> Dict[str, Any]:
+        """Parse single Python file and extract code structures"""
+        
         parsed_data = {
             'filename': filename,
+            'file_path': filename,
             'imports': [],
             'classes': [],
             'functions': [],
@@ -23,7 +28,6 @@ class ASTParser:
             for node in ast.iter_child_nodes(tree):
                 line_range = (node.lineno, getattr(node, 'end_lineno', node.lineno))
                 
-                # Skip if already processed
                 if line_range in processed_ranges:
                     continue
                 processed_ranges.add(line_range)
@@ -68,7 +72,6 @@ class ASTParser:
                             }
                             parsed_data['assignments'].append(assign_info)
             
-            # Debug logging
             print(f"DEBUG: Parsed {filename}")
             print(f"  - Functions: {len(parsed_data['functions'])}")
             print(f"  - Classes: {len(parsed_data['classes'])}")
@@ -85,6 +88,7 @@ class ASTParser:
         return parsed_data
     
     def _extract_code(self, lines: List[str], node) -> str:
+        """Extract source code for a node"""
         start = node.lineno - 1
         end = getattr(node, 'end_lineno', node.lineno)
         return '\n'.join(lines[start:end])
